@@ -18,8 +18,9 @@ C:\Users\<your username>\Documents\Arduino\libraries
 ```
 Đây là thư mục của file ZIP tải về, các file được highlight là cần chép.
 
-**KHÔNG CẦN THIẾT NHƯNG KHUYẾN KHÍCH** làm theo, có thể để thư viện trong cùng folder và Arduino IDE có thể nhận thư mục được.
 ![image](https://github.com/user-attachments/assets/143ca932-63c3-424b-9da5-c88de498a35e)
+
+**KHÔNG CẦN THIẾT NHƯNG KHUYẾN KHÍCH** làm theo, có thể để thư viện trong cùng folder và Arduino IDE có thể nhận thư mục được.
 
 ## Cài nhận diện ESP32 trong Boards Manager
 Cài 2 bộ sau:
