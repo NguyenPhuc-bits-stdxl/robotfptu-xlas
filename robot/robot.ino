@@ -1,154 +1,179 @@
+// Đấu nối:
+// Channel 2: Servo 1
+// Channel 3: Servo 2
+// Channel 1
+// Channel 8 & 9: Motor trái
+// Channel 10 & 11: Motor phải
+// I2C (under construction): Cảm biến khoảng cách sóng âm, phát hiện khoảng cách để giảm tốc.
+
+#include <Arduino.h>
+#include <Wire.h>
 #include <PS2X_lib.h>
 #include <Adafruit_PWMServoDriver.h>
-#include <Wire.h>
-/******************************************************************
- * Cài đặt chân cho thư viện :
- * - Trên mạch Motorshield của VIA Makerbot BANHMI, có header 6 chân
- *   được thiết kế để cắm tay cầm PS2.
- * Sơ đồ chân header và sơ đồ GPIO tương ứng:
- *   MOSI | MISO | GND | 3.3V | CS | CLK
- *    12     13    GND   3.3V   15   14
- ******************************************************************/
 
-#define PS2_DAT 12 // MISO
-#define PS2_CMD 13 // MOSI
-#define PS2_SEL 15 // SS
-#define PS2_CLK 14 // SLK
+#define PS2_DAT 12  // MISO
+#define PS2_CMD 13  // MOSI
+#define PS2_SEL 15  // SS
+#define PS2_CLK 14  // SLK
+#define X_JOY_CALIB 127
+#define Y_JOY_CALIB 128
 
-/******************************************************************
- * Lựa chọn chế độ cho tay cầm PS2 :
- *   - pressures = đọc giá trị analog từ các nút bấm
- *   - rumble    = bật/tắt chế độ rung
- ******************************************************************/
+#define SER1 2
+#define SER2 3
+#define SER3 4
+#define SER4 5
+#define SER5 6
+#define SER6 7
+#define MOL1 8
+#define MOL2 9
+#define MOR1 10
+#define MOR2 11
 
-#define pressures false
-#define rumble false
-
-#define SERVO_1_CHANNEL 2
-#define SERVO_2_CHANNEL 3
-#define SERVO_3_CHANNEL 4
-#define SERVO_4_CHANNEL 5
-#define SERVO_5_CHANNEL 6
-#define SERVO_6_CHANNEL 7
-
-PS2X ps2x; // khởi tạo class PS2x
-const double PWM_t_const = 2.2755555556;
+// Các % tốc độ
+#define HI_SPEED 100;
+#define MD_SPEED 50;
+#define LO_SPEED 30;
+#define SL_SPEED 10;
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
-void setServo(uint8_t channel, uint8_t angle) {
-    double pwm_send = (angle*PWM_t_const);
-    Serial.println((int)(pwm_send));
-    pwm.setPWM(channel, 0, pwm_send);
-}
+PS2X ps2x;
 
-void setup()
-{
-    Serial.begin(115200);
-    Serial.print("Ket noi voi tay cam PS2:");
-    pwm.begin();
-    pwm.setPWMFreq(50); 
-    int error = -1;
-    for (int i = 0; i < 10; i++) // thử kết nối với tay cầm ps2 trong 10 lần
-    {
-        delay(1000); // đợi 1 giây
-        // cài đặt chân và các chế độ: GamePad(clock, command, attention, data, Pressures?, Rumble?) check for error
-        error = ps2x.config_gamepad(PS2_CLK, PS2_CMD, PS2_SEL, PS2_DAT, pressures, rumble);
-        Serial.print(".");
-    }
+// Đừng đụng vào mấy cái const này!
+const double PWM_servo_const = 2.275555555555556;   // =2/(20/4096)/180, tính PWM 1 độ
+const double PWM_motor_const = 40.95;               // =4095/100, để lấy 1%
+const double PS2_convert_perc = 0.0078125;          // =1/128 (KHÔNG *100 vì phải lấy %, vd. 0.25) Tính intensity của magnitude abs 128, để chạy smooth start
 
-    switch (error) // kiểm tra lỗi nếu sau 10 lần không kết nối được
-    {
+uint8_t MOTOR_SPEED = MD_SPEED;
+
+void PS2_Connect() {
+  Serial.println("Connecting");
+
+  int error = -1;
+  // (clock, command, attention, data, pressure, rumble)
+  error = ps2x.config_gamepad(PS2_CLK, PS2_CMD, PS2_SEL, PS2_DAT, false, false);
+  Serial.print(".");
+
+  switch (error) {
     case 0:
-        Serial.println(" Ket noi tay cam PS2 thanh cong");
-        break;
+      Serial.println(" Success");
+      break;
     case 1:
-        Serial.println(" LOI: Khong tim thay tay cam, hay kiem tra day ket noi vơi tay cam ");
-        break;
+      Serial.println(" E Not Found");
+      break;
     case 2:
-        Serial.println(" LOI: khong gui duoc lenh");
-        break;
+      Serial.println(" E Can't send cmd");
+      break;
     case 3:
-        Serial.println(" LOI: Khong vao duoc Pressure mode ");
-        break;
-    }
+      Serial.println(" E Can't enter Pressure");
+      break;
+  }
 }
 
-void loop()
-{
-    ps2x.read_gamepad(false, false); // gọi hàm để đọc tay điều khiển
+void Quay_Servo(uint8_t channel, uint8_t angle) {
+  double pwm_send = (angle * PWM_t_const);
+  pwm.setPWM(channel, 0, pwm_send);
+  
+  Serial.print(" >> Sending PWM to channel, with value: ")
+  Serial.print(channel);
+  Serial.print(", ");
+  Serial.println(pwm_send);
+}
 
-    // các trả về giá trị TRUE (1) khi nút được giữ
-        if (ps2x.Button(PSB_START)) // nếu nút Start được giữ, in ra Serial monitor
-        Serial.println("Start is being held");
-    if (ps2x.Button(PSB_SELECT)) // nếu nút Select được giữ, in ra Serial monitor
-        Serial.println("Select is being held");
+// > 0 la thuan, < 0 la nguoc
+void Quay_Motor(uint8_t channel1, unit8_t channel2, int8_t power) {
+  bool thuan = (power > 0);
+  uint8_t power_send = abs(power);
+  pwm.setPin(channel1, power_send * PWM_motor_const *   thuan);
+  pwm.setPin(channel2, power_send * PWM_motor_const * (!thuan));
 
-    if (ps2x.Button(PSB_PAD_UP)) // tương tự như trên kiểm tra nút Lên (PAD UP)
-    {
-        Serial.print("Up held this hard: ");
-        Serial.println(ps2x.Analog(PSAB_PAD_UP), DEC); // đọc giá trị analog ở nút này, xem nút này được bấm mạnh hay nhẹ
+  Serial.print(" >> Spinning motor at channel, % power: ")
+  Serial.print(channel1);
+  Serial.print(", ");
+  Serial.println(power)
+}
 
-        Serial.println("Turning 90d");
-        setServo(2, 90);
-    }
-    if (ps2x.Button(PSB_PAD_RIGHT))
-    {
-        Serial.print("Right held this hard: ");
-        Serial.println(ps2x.Analog(PSAB_PAD_RIGHT), DEC);
+void Change_Speed(uint8_t speed) {
+  MOTOR_SPEED = speed;
 
-        Serial.println("Turning 130d");
-        setServo(2, 130);
-    }
-    if (ps2x.Button(PSB_PAD_LEFT))
-    {
-        Serial.print("LEFT held this hard: ");
-        Serial.println(ps2x.Analog(PSAB_PAD_LEFT), DEC);
-        
-        Serial.println("Turning 45d");
-        setServo(2, 45);
-    }
-    if (ps2x.Button(PSB_PAD_DOWN))
-    {
-        Serial.print("DOWN held this hard: ");
-        Serial.println(ps2x.Analog(PSAB_PAD_DOWN), DEC);
+  Serial.print("Changed speed to :");
+  Serial.println(speed);
+}
 
-        Serial.println("Turning 180d");
-        setServo(2, 180);
-    }
+void setup() {
+  Serial.begin(115200);
+  Serial.println("Press Start to connect")
 
-    if (ps2x.NewButtonState())
-    { // Trả về giá trị TRUE khi nút được thay đổi trạng thái (bật sang tắt, or tắt sang bật)
-        if (ps2x.Button(PSB_L3))
-            Serial.println("L3 pressed");
-        if (ps2x.Button(PSB_R3))
-            Serial.println("R3 pressed");
-        if (ps2x.Button(PSB_L2))
-            Serial.println("L2 pressed");
-        if (ps2x.Button(PSB_R2))
-            Serial.println("R2 pressed");
-        if (ps2x.Button(PSB_TRIANGLE))
-            Serial.println("△ pressed");
-    }
-    //△□○×
-    if (ps2x.ButtonPressed(PSB_CIRCLE)) // Trả về giá trị TRUE khi nút được ấn (từ tắt sang bật)
-        Serial.println("○ just pressed");
-    if (ps2x.NewButtonState(PSB_CROSS)) // Trả về giá trị TRUE khi nút được thay đổi trạng thái
-        Serial.println("× just changed");
-    if (ps2x.ButtonReleased(PSB_SQUARE)) //  Trả về giá trị TRUE khi nút được ấn (từ tắt sang bật)
-        Serial.println("□ just released");
+  pwm.begin();
+  pwm.setOscillatorFrequency(27000000);
+  pwm.setPWMFreq(50);
+  Wire.begin();
+  Wire.setClock(400000);
 
-    if (ps2x.Button(PSB_L1) || ps2x.Button(PSB_R1)) // các trả về giá trị TRUE khi nút được giữ
-    {                                               // Đọc giá trị 2 joystick khi nút L1 hoặc R1 được giữ
-        Serial.print("Stick Values:");
-        Serial.print(ps2x.Analog(PSS_LY)); // đọc trục Y của joystick bên trái. Other options: LX, RY, RX
-        Serial.print(",");
-        Serial.print(ps2x.Analog(PSS_LX), DEC);
-        Serial.print(",");
-        Serial.print(ps2x.Analog(PSS_RY), DEC);
-        Serial.print(",");
-        Serial.println(ps2x.Analog(PSS_RX), DEC);
-    }
+  Quay_Servo(SER1, 0);
+  Quay_Servo(SER2, 0);
+}
+
+int x, y, y_chk;
+double y_mag_percent, x_mag_percent;
+int8_t y_neg, x_neg, last_y = 1, last_x = 1;
+
+void loop() {
+  ps2x.read_gamepad(false, false);
+  y = Y_JOY_CALIB - ps2x.Analog(PSS_LY);
+  x = X_JOY_CALIB - ps2x.Analog(PSS_RX);
+  y_mag_percent = abs(y) * PS2_convert_perc;
+  x_mag_percent = abs(x) * PS2_convert_perc;
+
+  y_chk = Y_JOY_CALIB - ps2x.Analog(PSS_RY);
+
+  // Báo mất kết nối
+  if(x == -1 && y_chk == 0) {
+    Quay_Motor(MOL1, MOL2, 0);
+    Quay_Motor(MOR1, MOR2, 0);
     
-    //setServo(2, 0);
-    delay(50);
+    Serial.println("Disconnected")
+  }
+
+  // Ấn Start để kết nối
+  if (ps2x.Button(PSB_START)) PS2_Connect();
+  
+  // Servo 1: PSB_L1, PSB_L2
+  if (ps2x.Button(PSB_L2)) Quay_Servo(SER1, 0);   // càng đóng
+  if (ps2x.Button(PSB_L1)) Quay_Servo(SER1, 75);  // càng mở
+  // Servo 2: PSB_R1, PSB_R2
+  if (ps2x.Button(PSB_R2)) Quay_Servo(SER2, 0);   // càng đóng
+  if (ps2x.Button(PSB_R1)) Quay_Servo(SER2, 75);  // càng mở
+
+  // Chỉnh tốc độ
+  if (ps2x.Button(PSB_TRIANGLE))  Change_Speed(SL_SPEED);
+  if (ps2x.Button(PSB_CIRCLE))    Change_Speed(LO_SPEED);
+  if (ps2x.Button(PSB_CROSS))     Change_Speed(MD_SPEED);
+  if (ps2x.Button(PSB_SQUARE))    Change_Speed(HI_SPEED);
+  
+
+  // Di chuyển: Ưu tiên trục Oy
+  y_neg = 1 - 2*(y < 0);
+  x_neg = 1 - 2*(x < 0);
+  // Chú ý: x_neg = -1 nghĩa là quẹo trái, 1 là quẹo phải
+
+  // Đơ 450ms nữa để đảm bảo an toàn khi dò motor ngược chiều
+  // Nghĩa là last đang tiến (+) mà nhận lệnh lùi (-) thì sẽ ra 1 số < 0, do đó nhân lại để dò đơ
+  if ((y_neg * last_y < 0) || (x_neg * last_x < 0)) delay(450);
+
+  // Không cần lấy y_mag và x_mag vì, chỉ cần xét thằng nào mạnh hơn thôi, dùng % cũng được
+  if (y_mag_percent > x_mag_percent) {
+    Quay_Motor(MOL1, MOL2, MOTOR_SPEED * y_neg * y_mag_percent);
+    Quay_Motor(MOR1, MOR2, MOTOR_SPEED * y_neg * y_mag_percent);
+  }
+  else {
+    // Quay trái (x_neg = -1): phải thuận (+), trái nghịch (-)
+    // Quay phải (x_neg = +1): trái thuận (+), phải nghịch (-)
+    Quay_Motor(MOL1, MOL2, MOTOR_SPEED *   x_neg  * x_mag_percent);
+    Quay_Motor(MOR1, MOR2, MOTOR_SPEED * -(x_neg) * x_mag_percent);
+  }
+
+  last_y = y_neg;
+  last_x = x_neg;
+  
+  delay(50);
 }
