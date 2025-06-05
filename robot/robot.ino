@@ -44,6 +44,11 @@ const double PWM_motor_const = 40.95;               // =4095/100, để lấy 1%
 const double PS2_convert_perc = 0.0078125;          // =1/128 (KHÔNG *100 vì phải lấy %, vd. 0.25) Tính intensity của magnitude abs 128, để chạy smooth start
 
 uint8_t MOTOR_SPEED = MD_SPEED;
+bool DRIVE_ENABLED = false;
+
+int x, y, y_chk;
+double y_mag_percent, x_mag_percent;
+int8_t y_neg, x_neg, curr_l, curr_r, last_l = 0, last_r = 0;
 
 void PS2_Connect() {
   Serial.println("Connecting");
@@ -81,6 +86,11 @@ void Quay_Servo(uint8_t channel, uint8_t angle) {
 
 // > 0 la thuan, < 0 la nguoc
 void Quay_Motor(uint8_t channel1, uint8_t channel2, int8_t power) {
+  if (!DRIVE_ENABLED) {
+    Serial.println("Driving is disableed. Press Select to enable.");
+    return;
+  }
+
   bool thuan = (power > 0);
   uint8_t power_send = abs(power);
   pwm.setPin(channel1, power_send * PWM_motor_const *   thuan);
@@ -90,6 +100,12 @@ void Quay_Motor(uint8_t channel1, uint8_t channel2, int8_t power) {
   Serial.print(channel1);
   Serial.print(", ");
   Serial.println(power);
+}
+
+void Safe_Motor() {
+  // Đơ 450ms nữa để đảm bảo an toàn khi dò motor ngược chiều
+  // Nghĩa là last đang tiến (+) mà nhận curr lệnh lùi (-) thì sẽ ra 1 số < 0, do đó nhân lại để dò đơ
+  if ((last_l * curr_l < 0) || (last_r * curr_r < 0)) delay(450);
 }
 
 void Change_Speed(uint8_t speed) {
@@ -113,10 +129,6 @@ void setup() {
   Quay_Servo(SER2, 0);
 }
 
-int x, y, y_chk;
-double y_mag_percent, x_mag_percent;
-int8_t y_neg, x_neg, last_y = 1, last_x = 1;
-
 void loop() {
   ps2x.read_gamepad(false, false);
   y = Y_JOY_CALIB - ps2x.Analog(PSS_LY);
@@ -137,6 +149,15 @@ void loop() {
   // Ấn Start để kết nối
   if (ps2x.Button(PSB_START)) PS2_Connect();
   
+  // Ấn Select để bật/tắt Drive
+  if (ps2x.Button(PSB_SELECT)) {
+    DRIVE_ENABLED = !DRIVE_ENABLED;
+    Serial.print("Toggled drive: ");
+    if (DRIVE_ENABLED) Serial.println("ON");
+    else Serial.println("OFF");
+    delay(2000);
+  }
+
   // Servo 1: PSB_L1, PSB_L2
   if (ps2x.Button(PSB_L2)) Quay_Servo(SER1, 0);   // càng đóng
   if (ps2x.Button(PSB_L1)) Quay_Servo(SER1, 75);  // càng mở
@@ -156,24 +177,33 @@ void loop() {
   x_neg = 1 - 2*(x < 0);
   // Chú ý: x_neg = -1 nghĩa là quẹo trái, 1 là quẹo phải
 
-  // Đơ 450ms nữa để đảm bảo an toàn khi dò motor ngược chiều
-  // Nghĩa là last đang tiến (+) mà nhận lệnh lùi (-) thì sẽ ra 1 số < 0, do đó nhân lại để dò đơ
-  if ((y_neg * last_y < 0) || (x_neg * last_x < 0)) delay(450);
-
   // Không cần lấy y_mag và x_mag vì, chỉ cần xét thằng nào mạnh hơn thôi, dùng % cũng được
   if (y_mag_percent > x_mag_percent) {
+    // ML PWM = yneg; MR PWM = yneg
+    curr_l = y_neg; curr_r = y_neg;
+    Safe_Motor();
+
     Quay_Motor(MOL1, MOL2, MOTOR_SPEED * y_neg * y_mag_percent);
     Quay_Motor(MOR1, MOR2, MOTOR_SPEED * y_neg * y_mag_percent);
   }
-  else {
+  else if (y_mag_percent < x_mag_percent) {
     // Quay trái (x_neg = -1): phải thuận (+), trái nghịch (-)
     // Quay phải (x_neg = +1): trái thuận (+), phải nghịch (-)
+
+    // ML PWM = xneg; MR PWM = -xneg 
+    curr_l = x_neg; curr_r = -x_neg;
+    Safe_Motor();
+
     Quay_Motor(MOL1, MOL2, MOTOR_SPEED *   x_neg  * x_mag_percent);
     Quay_Motor(MOR1, MOR2, MOTOR_SPEED * -(x_neg) * x_mag_percent);
   }
+  else {
+    Quay_Motor(MOL1, MOL2, 0);
+    Quay_Motor(MOR1, MOR2, 0);
+  }
 
-  last_y = y_neg;
-  last_x = x_neg;
+  last_l = curr_l;
+  last_r = curr_r;
   
   delay(50);
 }
