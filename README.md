@@ -6,12 +6,19 @@ Tự xem cách cài driver CP210x cho Windows thông qua Device Manager (devmgmt
 
 Còn với macOS, bấm vào file dmg.
 
-## Cài đặt thư viện (for Windows)
-Tải file .ZIP về và chép hết tất cả các file .h và .cpp vào đường dẫn
+## Cài đặt thư viện
+Tải file .ZIP về và chép hết tất cả các file .h và .cpp vào:
+* For Windows:
 ```
 C:\Users\<your username>\Documents\Arduino\libraries
 ```
+* For macOS:
+```
+/Users/<your username>/Documents/Arduino
+```
 Đây là thư mục của file ZIP tải về, các file được highlight là cần chép.
+
+**KHÔNG CẦN THIẾT NHƯNG KHUYẾN KHÍCH** làm theo, có thể để thư viện trong cùng folder và Arduino IDE có thể nhận thư mục được.
 ![image](https://github.com/user-attachments/assets/143ca932-63c3-424b-9da5-c88de498a35e)
 
 ## Cài nhận diện ESP32 trong Boards Manager
