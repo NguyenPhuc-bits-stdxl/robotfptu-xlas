@@ -30,10 +30,10 @@
 #define MOR2 11
 
 // Các % tốc độ
-#define HI_SPEED 100;
-#define MD_SPEED 50;
-#define LO_SPEED 30;
-#define SL_SPEED 10;
+#define HI_SPEED 100
+#define MD_SPEED 50
+#define LO_SPEED 30
+#define SL_SPEED 20
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 PS2X ps2x;
@@ -70,26 +70,26 @@ void PS2_Connect() {
 }
 
 void Quay_Servo(uint8_t channel, uint8_t angle) {
-  double pwm_send = (angle * PWM_t_const);
+  double pwm_send = (angle * PWM_servo_const);
   pwm.setPWM(channel, 0, pwm_send);
   
-  Serial.print(" >> Sending PWM to channel, with value: ")
+  Serial.print(" >> Sending PWM to channel, with value: ");
   Serial.print(channel);
   Serial.print(", ");
   Serial.println(pwm_send);
 }
 
 // > 0 la thuan, < 0 la nguoc
-void Quay_Motor(uint8_t channel1, unit8_t channel2, int8_t power) {
+void Quay_Motor(uint8_t channel1, uint8_t channel2, int8_t power) {
   bool thuan = (power > 0);
   uint8_t power_send = abs(power);
   pwm.setPin(channel1, power_send * PWM_motor_const *   thuan);
   pwm.setPin(channel2, power_send * PWM_motor_const * (!thuan));
 
-  Serial.print(" >> Spinning motor at channel, % power: ")
+  Serial.print(" >> Spinning motor at channel, % power: ");
   Serial.print(channel1);
   Serial.print(", ");
-  Serial.println(power)
+  Serial.println(power);
 }
 
 void Change_Speed(uint8_t speed) {
@@ -101,7 +101,7 @@ void Change_Speed(uint8_t speed) {
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Press Start to connect")
+  Serial.println("Press Start to connect");
 
   pwm.begin();
   pwm.setOscillatorFrequency(27000000);
@@ -131,7 +131,7 @@ void loop() {
     Quay_Motor(MOL1, MOL2, 0);
     Quay_Motor(MOR1, MOR2, 0);
     
-    Serial.println("Disconnected")
+    Serial.println("Disconnected");
   }
 
   // Ấn Start để kết nối
@@ -145,10 +145,10 @@ void loop() {
   if (ps2x.Button(PSB_R1)) Quay_Servo(SER2, 75);  // càng mở
 
   // Chỉnh tốc độ
-  if (ps2x.Button(PSB_TRIANGLE))  Change_Speed(SL_SPEED);
-  if (ps2x.Button(PSB_CIRCLE))    Change_Speed(LO_SPEED);
-  if (ps2x.Button(PSB_CROSS))     Change_Speed(MD_SPEED);
-  if (ps2x.Button(PSB_SQUARE))    Change_Speed(HI_SPEED);
+  if (ps2x.Button(PSB_TRIANGLE)) Change_Speed(SL_SPEED);
+  if (ps2x.Button(PSB_CIRCLE))   Change_Speed(LO_SPEED);
+  if (ps2x.Button(PSB_CROSS))    Change_Speed(MD_SPEED);
+  if (ps2x.Button(PSB_SQUARE))   Change_Speed(HI_SPEED);
   
 
   // Di chuyển: Ưu tiên trục Oy
