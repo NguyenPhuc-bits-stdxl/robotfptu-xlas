@@ -1,10 +1,9 @@
 // Đấu nối:
 // Channel 2: Servo 1
 // Channel 3: Servo 2
-// Channel 1
+// Channel 1: Motor 30RPM bàn nâng
 // Channel 8 & 9: Motor trái
 // Channel 10 & 11: Motor phải
-// I2C (under construction): Cảm biến khoảng cách sóng âm, phát hiện khoảng cách để giảm tốc.
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -15,8 +14,6 @@
 #define PS2_CMD 13  // MOSI
 #define PS2_SEL 15  // SS
 #define PS2_CLK 14  // SLK
-#define X_JOY_CALIB 127
-#define Y_JOY_CALIB 128
 
 #define SER1 2
 #define SER2 3
@@ -28,12 +25,13 @@
 #define MOL2 9
 #define MOR1 10
 #define MOR2 11
+#define SLIFT1 12
+#define SLIFT2 13
 
 // Các % tốc độ
 #define HI_SPEED 100
 #define MD_SPEED 50
 #define LO_SPEED 30
-#define SL_SPEED 20
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 PS2X ps2x;
@@ -44,11 +42,15 @@ const double PWM_motor_const = 40.95;               // =4095/100, để lấy 1%
 const double PS2_convert_perc = 0.0078125;          // =1/128 (KHÔNG *100 vì phải lấy %, vd. 0.25) Tính intensity của magnitude abs 128, để chạy smooth start
 
 uint8_t MOTOR_SPEED = MD_SPEED;
+uint8_t LIFT_SPEED = HI_SPEED;
 bool DRIVE_ENABLED = false;
 
 int x, y, y_chk;
 double y_mag_percent, x_mag_percent;
 int8_t y_neg, x_neg, curr_l, curr_r, last_l = 0, last_r = 0;
+
+uint8_t X_JOY_CALIB = 127;
+uint8_t Y_JOY_CALIB = 128;
 
 void PS2_Connect() {
   Serial.println("Connecting");
@@ -105,7 +107,11 @@ void Quay_Motor(uint8_t channel1, uint8_t channel2, int8_t power) {
 void Safe_Motor() {
   // Đơ 450ms nữa để đảm bảo an toàn khi dò motor ngược chiều
   // Nghĩa là last đang tiến (+) mà nhận curr lệnh lùi (-) thì sẽ ra 1 số < 0, do đó nhân lại để dò đơ
-  if ((last_l * curr_l < 0) || (last_r * curr_r < 0)) delay(450);
+  if ((last_l * curr_l < 0) || (last_r * curr_r < 0)) {
+    Quay_Motor(MOL1, MOL2, 0);
+    Quay_Motor(MOR1, MOR2, 0);
+    delay(450);
+  }
 }
 
 void Change_Speed(uint8_t speed) {
@@ -118,6 +124,8 @@ void Change_Speed(uint8_t speed) {
 void setup() {
   Serial.begin(115200);
   Serial.println("Press Start to connect");
+  Serial.println("Then, press Select to toggle Drive");
+  Serial.println("In need of calibrating joysticks, press Cross, default X=127 and Y=128");
 
   pwm.begin();
   pwm.setOscillatorFrequency(27000000);
@@ -166,16 +174,37 @@ void loop() {
   if (ps2x.Button(PSB_R1)) Quay_Servo(SER2, 75);  // càng mở
 
   // Chỉnh tốc độ
-  if (ps2x.Button(PSB_TRIANGLE)) Change_Speed(SL_SPEED);
-  if (ps2x.Button(PSB_CIRCLE))   Change_Speed(LO_SPEED);
-  if (ps2x.Button(PSB_CROSS))    Change_Speed(MD_SPEED);
-  if (ps2x.Button(PSB_SQUARE))   Change_Speed(HI_SPEED);
+  if (ps2x.Button(PSB_TRIANGLE)) Change_Speed(LO_SPEED);
+  if (ps2x.Button(PSB_SQUARE))   Change_Speed(MD_SPEED);
+  if (ps2x.Button(PSB_CIRCLE))   Change_Speed(HI_SPEED);
+
+  // Calibrate lại joystick
+  // Bỏ tay ra khỏi joystick trong khi calibrate
+  if (ps2x.Button(PSB_CROSS)) {
+    X_JOY_CALIB = ps2x.Analog(PSS_RX);
+    Y_JOY_CALIB = ps2x.Analog(PSS_LY);
+    delay(2000);
+
+    Serial.print("Calibrated to x = ");
+    Serial.print(X_JOY_CALIB);
+    Serial.print(" and y = ");
+    Serial.println(Y_JOY_CALIB);
+  }
   
+  // Nâng hạ
+  if (ps2x.Button(PSB_PAD_UP) || ps2x.Button(PSB_PAD_RIGHT)) {
+    Quay_Motor(SLIFT1, SLIFT2, LIFT_SPEED);
+    delay(150);
+  }
+  if (ps2x.Button(PSB_PAD_DOWN) || ps2x.Button(PSB_PAD_LEFT)) {
+    Quay_Motor(SLIFT1, SLIFT2, -LIFT_SPEED);
+    delay(150);
+  }
 
   // Di chuyển: Ưu tiên trục Oy
+  // Chú ý: x_neg = -1 nghĩa là quẹo trái, 1 là quẹo phải
   y_neg = 1 - 2*(y < 0);
   x_neg = 1 - 2*(x < 0);
-  // Chú ý: x_neg = -1 nghĩa là quẹo trái, 1 là quẹo phải
 
   // Không cần lấy y_mag và x_mag vì, chỉ cần xét thằng nào mạnh hơn thôi, dùng % cũng được
   if (y_mag_percent > x_mag_percent) {
