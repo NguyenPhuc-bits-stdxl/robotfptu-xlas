@@ -1,4 +1,4 @@
-### Đây là file robot ESP32, điều khiển 2 servo, 2 motor 300RPM
+### Đây là file robot ESP32, điều khiển 2 servo, 2 motor 300RPM, 1 motor 30RPM bằng PS2 controller
 ## Quan trọng: Cài driver CP210x
 Cài driver CP210x ở [đây](https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers?tab=downloads).
 
@@ -24,7 +24,7 @@ C:\Users\<your username>\Documents\Arduino\libraries
 
 ## Cài nhận diện ESP32 trong Boards Manager
 Cài 2 bộ sau:
-* **Arduino** ESP32 Boards by Arduino
+* **Arduino ESP32 Boards** by Arduino
 * **esp32** by Espressif Systems
 
 ## Cách nạp
