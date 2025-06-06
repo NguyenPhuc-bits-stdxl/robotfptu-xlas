@@ -76,7 +76,10 @@ void PS2_Connect() {
   }
 }
 
-void Quay_Servo(uint8_t channel, uint8_t angle) {
+void Quay_Servo_180(uint8_t channel, uint8_t angle) {
+  if (angle < 0) angle = 0;
+  if (angle > 180) angle = 180;
+
   double pwm_send = (angle * PWM_servo_const);
   pwm.setPWM(channel, 0, pwm_send);
   
@@ -92,6 +95,9 @@ void Quay_Motor(uint8_t channel1, uint8_t channel2, int8_t power) {
     Serial.println("Driving is disableed. Press Select to enable.");
     return;
   }
+
+  if (power > 100) power = 100;
+  if (power < -100) power = -100;
 
   bool thuan = (power > 0);
   uint8_t power_send = abs(power);
@@ -133,8 +139,8 @@ void setup() {
   Wire.begin();
   Wire.setClock(400000);
 
-  Quay_Servo(SER1, 0);
-  Quay_Servo(SER2, 0);
+  Quay_Servo_180(SER1, 0);
+  Quay_Servo_180(SER2, 0);
 }
 
 void loop() {
@@ -167,11 +173,11 @@ void loop() {
   }
 
   // Servo 1: PSB_L1, PSB_L2
-  if (ps2x.Button(PSB_L2)) Quay_Servo(SER1, 0);   // càng đóng
-  if (ps2x.Button(PSB_L1)) Quay_Servo(SER1, 75);  // càng mở
+  if (ps2x.Button(PSB_L2)) Quay_Servo_180(SER1, 0);   // càng đóng
+  if (ps2x.Button(PSB_L1)) Quay_Servo_180(SER1, 75);  // càng mở
   // Servo 2: PSB_R1, PSB_R2
-  if (ps2x.Button(PSB_R2)) Quay_Servo(SER2, 0);   // càng đóng
-  if (ps2x.Button(PSB_R1)) Quay_Servo(SER2, 75);  // càng mở
+  if (ps2x.Button(PSB_R2)) Quay_Servo_180(SER2, 0);   // càng đóng
+  if (ps2x.Button(PSB_R1)) Quay_Servo_180(SER2, 75);  // càng mở
 
   // Chỉnh tốc độ
   if (ps2x.Button(PSB_TRIANGLE)) Change_Speed(LO_SPEED);
