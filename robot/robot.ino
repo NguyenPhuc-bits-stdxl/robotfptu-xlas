@@ -29,29 +29,28 @@
 #define SLIFT2 13
 
 // Các % tốc độ
-#define HI_SPEED 80
-#define MD_SPEED 20
-#define LO_SPEED 10
+#define HI_SPEED 0.95
+#define MD_SPEED 0.55
+#define LO_SPEED 0.12
 
 // Góc servo
-#define SER_OPEN = 60
-#define SER_CLOSE = 180
+#define SER_OPEN  60
+#define SER_CLOSE  180
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 PS2X ps2x;
 
 // Đừng đụng vào mấy cái const này!
 const double PWM_servo_const = 2.275555555555556;   // =2/(20/4096)/180, tính PWM 1 độ
-const double PWM_motor_const = 40.95;               // =4095/100, để lấy 1%
-const double PS2_convert_perc = 0.0078125;          // =1/128 (KHÔNG *100 vì phải lấy %, vd. 0.25) Tính intensity của magnitude abs 128, để chạy smooth start
 
-uint8_t MOTOR_SPEED = MD_SPEED;
-uint8_t LIFT_SPEED = HI_SPEED;
+double MOTOR_SPEED = MD_SPEED;
+uint8_t LIFT_POWER = 100;
 bool DRIVE_ENABLED = false;
 
 int x, y;
-double y_mag_percent, x_mag_percent;
 int8_t y_neg, x_neg, curr_l, curr_r, last_l = 0, last_r = 0;
+double ps2_pow, m_pow;
+bool y_wait;
 
 uint8_t X_JOY_CALIB = 128;
 uint8_t Y_JOY_CALIB = 127;
@@ -97,9 +96,13 @@ void Quay_Servo_180(uint8_t channel, uint8_t angle) {
 }
 
 // > 0 THUẬN, < 0 NGƯỢC
-void Quay_Motor(uint8_t channel1, uint8_t channel2, int8_t power) {
-  if ((!DRIVE_ENABLED) && (power != 0)) {
-    Serial.println("Driving is disabled. Press Select to enable.");
+// Note: PWM motor dead zone: 0 .. 204.5
+// Conversion % power to PWM: y = 39.2979798 x + 165.2020202
+// KHI NÀO DÙNG BYPASSDRIVE
+// Set 0 khẩn cấp, hoặc chỉnh bàn nâng
+void Quay_Motor(uint8_t channel1, uint8_t channel2, double power, bool bypassdrivecheck) {
+  if ((!DRIVE_ENABLED) && (!bypassdrivecheck)) {
+    if (power != 0) Serial.println("Driving is disabled. Press Select to enable.");
     return;
   }
 
@@ -108,28 +111,10 @@ void Quay_Motor(uint8_t channel1, uint8_t channel2, int8_t power) {
   if (power < -100) power = -100;
 
   bool thuan = (power > 0);
-  uint8_t power_send = abs(power);
-  pwm.setPin(channel1, power_send * PWM_motor_const *   thuan);
-  pwm.setPin(channel2, power_send * PWM_motor_const * (!thuan));
+  uint8_t pwm_send = (int)(39.2979798 * abs(power) + 165.2020202);
 
-  if (power == 0) return;
-  Serial.print(" >> Spinning motor at channel, % power: ");
-  Serial.print(channel1);
-  Serial.print(", ");
-  Serial.println(power);
-}
-
-// KHI NÀO DÙNG BYPASSDRIVE
-// Set 0 khẩn cấp, hoặc chỉnh bàn nâng
-// Bỏ qua check DRIVE_ENABLED
-void Quay_Motor(uint8_t channel1, uint8_t channel2, int8_t power, bool bypassdrive) {
-  if (power > 100) power = 100;
-  if (power < -100) power = -100;
-
-  bool thuan = (power > 0);
-  uint8_t power_send = abs(power);
-  pwm.setPin(channel1, power_send * PWM_motor_const *   thuan);
-  pwm.setPin(channel2, power_send * PWM_motor_const * (!thuan));
+  pwm.setPin(channel1, pwm_send *   thuan);
+  pwm.setPin(channel2, pwm_send * (!thuan));
 
   if (power == 0) return;
   Serial.print(" >> Spinning motor at channel, % power: ");
@@ -183,10 +168,16 @@ void setup() {
 
 void loop() {
   ps2x.read_gamepad(false, false);
+
+  // Chú ý: x_neg = -1 nghĩa là quẹo trái, 1 là quẹo phải
   y = Y_JOY_CALIB - ps2x.Analog(PSS_LY);
   x = X_JOY_CALIB - ps2x.Analog(PSS_RX);
-  y_mag_percent = abs(y) * PS2_convert_perc;
-  x_mag_percent = abs(x) * PS2_convert_perc;
+  y_neg = 1 - 2*(y < 0);
+  x_neg = 1 - 2*(x < 0);
+  y = abs(y);
+  x = abs(x);
+
+  y_wait = false;
 
   // Báo mất kết nối
   if(x == -127 && y == -128) {
@@ -238,46 +229,44 @@ void loop() {
   if ((ps2x.Button(PSB_PAD_UP)) && (ps2x.Button(PSB_PAD_DOWN))) Serial.println("LIFT Input conflict!");
   else {
     if (ps2x.Button(PSB_PAD_UP)) {
-      Quay_Motor(SLIFT1, SLIFT2, LIFT_SPEED, true);
+      Quay_Motor(SLIFT1, SLIFT2, LIFT_POWER, true);
       delay(150);
       Quay_Motor(SLIFT1, SLIFT2, 0, true);
     }
     if (ps2x.Button(PSB_PAD_DOWN)) {
-      Quay_Motor(SLIFT1, SLIFT2, -LIFT_SPEED, true);
+      Quay_Motor(SLIFT1, SLIFT2, -LIFT_POWER, true);
       delay(150);
       Quay_Motor(SLIFT1, SLIFT2, 0, true);
     }
   }
 
-  // Note: PWM motor dead zone: 0 .. 204.5
-  // Conversion for soft-start: y = 30.39453125*x + 204.5
-  // Chú ý: x_neg = -1 nghĩa là quẹo trái, 1 là quẹo phải
-  y_neg = 1 - 2*(y < 0);
-  x_neg = 1 - 2*(x < 0);
-
-  // Không cần lấy y_mag và x_mag vì, chỉ cần xét thằng nào mạnh hơn thôi, dùng % cũng được
-  if (y_mag_percent > x_mag_percent) {
-    // ML PWM = yneg; MR PWM = yneg
-    curr_l = y_neg; curr_r = y_neg;
-    Safe_Motor();
-
-    Quay_Motor(MOL1, MOL2, MOTOR_SPEED * y_neg * y_mag_percent);
-    Quay_Motor(MOR1, MOR2, MOTOR_SPEED * y_neg * y_mag_percent);
-  }
-  else if (y_mag_percent < x_mag_percent) {
-    // Quay trái (x_neg = -1): phải thuận (+), trái nghịch (-)
-    // Quay phải (x_neg = +1): trái thuận (+), phải nghịch (-)
-
-    // ML PWM = xneg; MR PWM = -xneg 
-    curr_l = x_neg; curr_r = -x_neg;
-    Safe_Motor();
-
-    Quay_Motor(MOL1, MOL2, MOTOR_SPEED *   x_neg  * x_mag_percent);
-    Quay_Motor(MOR1, MOR2, MOTOR_SPEED * -(x_neg) * x_mag_percent);
-  }
-  else {
+  // Chuyển từ gamepad sang % power: y = 0.7983870968 x - 1.39516129
+  // Tránh stick-drift (-2..2)
+  if (x <= 2 || y <= 2) {
     Quay_Motor(MOL1, MOL2, 0, true);
     Quay_Motor(MOR1, MOR2, 0, true);
+  }
+  if (y > 2) {
+    curr_l = y_neg; curr_r = y_neg;
+    ps2_pow = 0.7983870968*y - 1.39516129;
+    m_pow = y_neg * MOTOR_SPEED * ps2_pow;
+
+    Safe_Motor();
+    y_wait = true;
+
+    Quay_Motor(MOL1, MOL2, m_pow, false);
+    Quay_Motor(MOR1, MOR2, m_pow, false);
+  }
+  if (x > 2) {
+    curr_l = x_neg; curr_r = -x_neg;
+    ps2_pow = 0.7983870968*x - 1.39516129;
+    m_pow = MOTOR_SPEED * ps2_pow;
+
+    Safe_Motor();
+    if (y_wait) delay(50);
+
+    Quay_Motor(MOL1, MOL2, curr_l * m_pow, false);
+    Quay_Motor(MOR1, MOR2, curr_r * m_pow, false);
   }
 
   last_l = curr_l;
