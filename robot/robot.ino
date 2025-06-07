@@ -29,9 +29,13 @@
 #define SLIFT2 13
 
 // Các % tốc độ
-#define HI_SPEED 100
-#define MD_SPEED 15
-#define LO_SPEED 5
+#define HI_SPEED 80
+#define MD_SPEED 20
+#define LO_SPEED 10
+
+// Góc servo
+#define SER_OPEN = 60
+#define SER_CLOSE = 180
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 PS2X ps2x;
@@ -45,7 +49,7 @@ uint8_t MOTOR_SPEED = MD_SPEED;
 uint8_t LIFT_SPEED = HI_SPEED;
 bool DRIVE_ENABLED = false;
 
-int x, y, y_chk;
+int x, y;
 double y_mag_percent, x_mag_percent;
 int8_t y_neg, x_neg, curr_l, curr_r, last_l = 0, last_r = 0;
 
@@ -53,7 +57,7 @@ uint8_t X_JOY_CALIB = 128;
 uint8_t Y_JOY_CALIB = 127;
 
 bool PS2_Connect() {
-  Serial.println("Connecting");
+  Serial.print("Connecting... ");
 
   int error = -1;
   // (clock, command, attention, data, pressure, rumble)
@@ -78,6 +82,7 @@ bool PS2_Connect() {
   return false;
 }
 
+// DÙNG CHO SERVO 180
 void Quay_Servo_180(uint8_t channel, uint8_t angle) {
   if (angle < 0) angle = 0;
   if (angle > 180) angle = 180;
@@ -91,13 +96,14 @@ void Quay_Servo_180(uint8_t channel, uint8_t angle) {
   Serial.println(pwm_send);
 }
 
-// > 0 la thuan, < 0 la nguoc
+// > 0 THUẬN, < 0 NGƯỢC
 void Quay_Motor(uint8_t channel1, uint8_t channel2, int8_t power) {
   if ((!DRIVE_ENABLED) && (power != 0)) {
     Serial.println("Driving is disabled. Press Select to enable.");
     return;
   }
 
+  // Cap max độ lớn
   if (power > 100) power = 100;
   if (power < -100) power = -100;
 
@@ -113,6 +119,9 @@ void Quay_Motor(uint8_t channel1, uint8_t channel2, int8_t power) {
   Serial.println(power);
 }
 
+// KHI NÀO DÙNG BYPASSDRIVE
+// Set 0 khẩn cấp, hoặc chỉnh bàn nâng
+// Bỏ qua check DRIVE_ENABLED
 void Quay_Motor(uint8_t channel1, uint8_t channel2, int8_t power, bool bypassdrive) {
   if (power > 100) power = 100;
   if (power < -100) power = -100;
@@ -131,7 +140,8 @@ void Quay_Motor(uint8_t channel1, uint8_t channel2, int8_t power, bool bypassdri
 
 void Safe_Motor() {
   // Đơ để đảm bảo an toàn khi dò motor ngược chiều
-  // Nghĩa là last đang tiến (+) mà nhận curr lệnh lùi (-) thì sẽ ra 1 số < 0, do đó nhân lại để dò đơ
+  // Nghĩa là last đang tiến (+) mà nhận curr lệnh lùi (-) thì sẽ ra 1 số < 0, do đó nhân lại để dò đơ 50ms
+  // FLAGS: BYPASS_DRIVE_MODE
   if ((last_l * curr_l < 0) || (last_r * curr_r < 0)) {
     Quay_Motor(MOL1, MOL2, 0, true);
     Quay_Motor(MOR1, MOR2, 0, true);
@@ -157,11 +167,17 @@ void setup() {
   Wire.begin();
   Wire.setClock(400000);
 
+  // Reset 
+  // FLAGS: BYPASS_DRIVE_MODE
+  DRIVE_ENABLED = false;
   Quay_Servo_180(SER1, 0);
   Quay_Servo_180(SER2, 0);
+  Quay_Motor(MOL1, MOL2, 0, true);
+  Quay_Motor(MOR1, MOR2, 0, true);
+  Quay_Motor(SLIFT1, SLIFT2, 0, true);
   
   // Liên tục kết nối cho đến khi thành công
-  Serial.println("Connecting...");
+  Serial.println("Initializing PS2...");
   while (!PS2_Connect()) {}
 }
 
@@ -176,6 +192,7 @@ void loop() {
   if(x == -127 && y == -128) {
     Quay_Motor(MOL1, MOL2, 0, true);
     Quay_Motor(MOR1, MOR2, 0, true);
+    Quay_Motor(SLIFT1, SLIFT2, 0, true);
     DRIVE_ENABLED = false;
     
     Serial.println("Disconnected. Reconnecting...");
@@ -192,11 +209,11 @@ void loop() {
   }
 
   // Servo 1: PSB_L1, PSB_L2
-  if (ps2x.Button(PSB_L2)) Quay_Servo_180(SER1, 180);   // càng đóng
-  if (ps2x.Button(PSB_L1)) Quay_Servo_180(SER1, 75);  // càng mở
+  if (ps2x.Button(PSB_L2)) Quay_Servo_180(SER1, SER_CLOSE);   // càng đóng
+  if (ps2x.Button(PSB_L1)) Quay_Servo_180(SER1, SER_OPEN);    // càng mở
   // Servo 2: PSB_R1, PSB_R2
-  if (ps2x.Button(PSB_R2)) Quay_Servo_180(SER2, 180);   // càng đóng
-  if (ps2x.Button(PSB_R1)) Quay_Servo_180(SER2, 75);  // càng mở
+  if (ps2x.Button(PSB_R2)) Quay_Servo_180(SER2, SER_CLOSE);   // càng đóng
+  if (ps2x.Button(PSB_R1)) Quay_Servo_180(SER2, SER_OPEN);    // càng mở
 
   // Chỉnh tốc độ
   if (ps2x.Button(PSB_TRIANGLE)) Change_Speed(LO_SPEED);
@@ -208,20 +225,17 @@ void loop() {
   if (ps2x.Button(PSB_CROSS)) {
     X_JOY_CALIB = ps2x.Analog(PSS_RX);
     Y_JOY_CALIB = ps2x.Analog(PSS_LY);
-    delay(2000);
 
-    Serial.print("Calibrated to x = ");
     Serial.print(X_JOY_CALIB);
     Serial.print(" and y = ");
     Serial.println(Y_JOY_CALIB);
+    Serial.print("Calibrated to x = ");
+    delay(2000);
   }
-  
 
   // Nâng hạ
-
-  if ((ps2x.Button(PSB_PAD_UP)) && (ps2x.Button(PSB_PAD_DOWN))) {
-    Serial.println("Input conflict!");
-  }
+  // FLAGS: BYPASS_DRIVE_MODE
+  if ((ps2x.Button(PSB_PAD_UP)) && (ps2x.Button(PSB_PAD_DOWN))) Serial.println("LIFT Input conflict!");
   else {
     if (ps2x.Button(PSB_PAD_UP)) {
       Quay_Motor(SLIFT1, SLIFT2, LIFT_SPEED, true);
@@ -235,7 +249,8 @@ void loop() {
     }
   }
 
-  // Di chuyển: Ưu tiên trục Oy
+  // Note: PWM motor dead zone: 0 .. 204.5
+  // Conversion for soft-start: y = 30.39453125*x + 204.5
   // Chú ý: x_neg = -1 nghĩa là quẹo trái, 1 là quẹo phải
   y_neg = 1 - 2*(y < 0);
   x_neg = 1 - 2*(x < 0);
